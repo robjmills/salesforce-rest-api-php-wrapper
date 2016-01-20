@@ -1,27 +1,39 @@
 <?php
 
-use SalesforceRestAPI;
+require 'vendor/autoload.php';
 
-$salesforce = new SalesforceAPI('https://na17.salesforce.com','32.0','<Consumer Key>', '<Consumer Secret>');
+use SalesforceRestAPI\SalesforceAPI;
+use SalesforceRestAPI\SalesforceAPIException;
 
-$salesforce->login('<Salesforce Login>','<Salesforce Password>','<Salesforce Security Token>');
+$instanceUrl    = 'https://<instance-name>.salesforce.com';
+$apiVersion     = '35.0';
+$consumerKey    = '';
+$consumerSecret = '';
+$username       = '';
+$password       = '';
+$securityToken  = '';
 
-$api_versions = $salesforce->getAPIVersions();
+try {
+    $salesforce = new SalesforceAPI($instanceUrl, $apiVersion, $consumerKey, $consumerSecret);
+    $salesforce->login($username, $password, $securityToken);
+}catch (SalesforceAPIException $e){
+    exit('Failed to connect to Salesforce: ' . $e->getMessage());
+}
+
+$apiVersions = $salesforce->getAPIVersions();
 $limits = $salesforce->getOrgLimits();
 $resource = $salesforce->getAvailableResources();
 $objects = $salesforce->getAllObjects();
 
-$date = new DateTime();
-
+$response = $salesforce->searchSOQL("SELECT CustomField__c, Name FROM Account WHERE CustomField__c = '1'", true);
 $good_metadata = $salesforce->getObjectMetadata('Account');
 $good_metadata_all = $salesforce->getObjectMetadata('Account', true);
-$good_metadata_since = $salesforce->getObjectMetadata('Account', true, $date);
-$bad_metadata = $salesforce->getObjectMetadata('SomeOtherObject');
 
-$create_account = $salesforce->create( 'Account', ['name' => 'New Account'] );
-$update_project = $salesforce->update( 'Account', $create_account->id, ['name' => 'Changed'] );
-$project = $salesforce->get( 'Account', $create_account->id );
-$project_with_fields = $salesforce->get( 'Account', $create_account->id, ['Name', 'OwnerId'] );
-$delete_project = $salesforce->delete( 'Account', $create_account->id );
+$date = new DateTime();
+$good_metadata_since = $salesforce->getObjectMetadata('Account', true, $date); // broken
 
-$response = $salesforce->searchSOQL('SELECT name from Position__c',true);
+$create_account = $salesforce->create( 'Account', ['name' => 'New Account', 'GoReact_Org_ID__c' => 0] );
+$update_project = $salesforce->update( 'Account', $create_account['id'], ['name' => 'Changed'] );
+$project = $salesforce->get( 'Account', $create_account['id'] );
+$project_with_fields = $salesforce->get( 'Account', $create_account['id'], ['Name', 'OwnerId'] );
+$delete_project = $salesforce->delete( 'Account', $create_account['id'] );

@@ -1,21 +1,41 @@
 <?php namespace SalesforceRestAPI;
 
 use DateTime;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ClientException;
+use Psr\Http\Message\ResponseInterface;
 
 /**
  * The Salesforce REST API PHP Wrapper.
  *
  * This class connects to the Salesforce REST API and performs actions on that API
  *
- * @author Anthony Humes <jah.humes@gmail.com>
- * @license GPL, or GNU General Public License, version 2
+ * @author Mike Corrigan <mike@corrlabs.com>
+ * @author Anthony Humes <jah.humes@gmail.com> (original author)
+ * @license GPL-2.0
  */
 class SalesforceAPI
 {
+    // Supported HTTP request methods
+    private static $HTTP_METHOD_DELETE    = 'DELETE';
+    private static $HTTP_METHOD_GET       = 'GET';
+    private static $HTTP_METHOD_POST      = 'POST';
+    private static $HTTP_METHOD_PATCH     = 'PATCH';
+
     /**
-     * @var mixed
+     * Object URI
      */
-    public $last_response;
+    private static $OBJECT_URI = 'sobjects/';
+
+    /**
+     * Grant-type
+     */
+    private static $GRANT_TYPE = 'password';
+
+    /**
+     * @var ResponseInterface
+     */
+    protected $last_response;
 
     /**
      * @var string
@@ -28,26 +48,6 @@ class SalesforceAPI
     protected $client_secret;
 
     /**
-     * @var string
-     */
-    protected $instance_url;
-
-    /**
-     * @var string
-     */
-    protected $base_url;
-
-    /**
-     * @var array
-     */
-    protected $headers;
-
-    /**
-     * @var string
-     */
-    protected $return_type;
-
-    /**
      * @var int|string
      */
     protected $api_version;
@@ -55,54 +55,38 @@ class SalesforceAPI
     /**
      * @var string
      */
-    private $access_token;
+    protected $access_token;
 
     /**
-     * @var resource
+     * @var Client
      */
-    private $handle;
-
-    // Supported request methods
-
-    const METH_DELETE = 'DELETE';
-    const METH_GET = 'GET';
-    const METH_POST = 'POST';
-    const METH_PUT = 'PUT';
-    const METH_PATCH = 'PATCH';
-
-    // Return types
-    const RETURN_OBJECT = 'object';
-    const RETURN_ARRAY_A = 'array_a';
-
-    const LOGIN_PATH = '/services/oauth2/token';
-    const OBJECT_PATH = 'sobjects/';
-    const GRANT_TYPE = 'password';
+    protected $guzzle;
 
     /**
-     * Constructs the SalesforceConnection.
+     * @var bool
+     */
+    protected $debug;
+
+    /**
+     * Constructs the SalesforceAPI
      *
      * This sets up the connection to salesforce and instantiates all default variables
      *
      * @param string     $instanceUrl  The url to connect to
-     * @param string|int $version       The version of the API to connect to
+     * @param string|int $version      The version of the API to connect to
      * @param string     $clientId     The Consumer Key from Salesforce
      * @param string     $clientSecret The Consumer Secret from Salesforce
+     * @param bool       $debug        If the requests should output debug information (default: false)
      */
-    public function __construct($instanceUrl, $version, $clientId, $clientSecret, $returnType = self::RETURN_ARRAY_A)
+    public function __construct($instanceUrl, $version, $clientId, $clientSecret, $debug = false)
     {
         // Instantiate base variables
-        $this->instance_url  = $instanceUrl;
         $this->api_version   = $version;
         $this->client_id     = $clientId;
         $this->client_secret = $clientSecret;
-        $this->return_type   = $returnType;
+        $this->debug         = $debug;
 
-        $this->base_url      = $instanceUrl;
-        $this->instance_url  = $instanceUrl.'/services/data/v'.$version.'/';
-
-        $this->headers = [
-            'Content-Type' => 'application/json',
-        ];
+        $this->guzzle = new Client(['base_uri' => $instanceUrl]);
     }
 
     /**
@@ -112,104 +96,113 @@ class SalesforceAPI
      * @param string $password
      * @param string $securityToken
      *
-     * @return mixed
+     * @return ResponseInterface
      *
      * @throws SalesforceAPIException
      */
     public function login($username, $password, $securityToken)
     {
-        // Set the login data
         $login_data = [
-            'grant_type' => self::GRANT_TYPE,
-            'client_id' => $this->client_id,
+            'grant_type'    => self::$GRANT_TYPE,
+            'client_id'     => $this->client_id,
             'client_secret' => $this->client_secret,
-            'username' => $username,
-            'password' => $password.$securityToken,
+            'username'      => $username,
+            'password'      => $password.$securityToken,
         ];
 
-        $ch = curl_init();
+        try {
+            $response = $this->guzzle->post('/services/oauth2/token', [
+                'form_params' => $login_data,
+                'debug'       => $this->debug
+            ]);
+        }
+        catch (ClientException $e)
+        {
+            throw new SalesforceAPIException($e->getMessage());
+        }
 
-        curl_setopt($ch, CURLOPT_URL, $this->base_url.'/services/oauth2/token');
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_HEADER, 0);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $login_data);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_SSLVERSION, 4);
-
-        $ret = curl_exec($ch);
-        $err = curl_error($ch);
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        $this->checkForRequestErrors($ret, $ch);
-        curl_close($ch);
-
-        $ret = json_decode($ret);
-        $this->afterLoginSetup($ret);
-
-        return $ret;
-    }
-
-    /**
-     * afterLoginSetup
-     *
-     * @param object $loginResponse json_decoded /services/oauth2/token response
-     * @return bool
-     */
-    public function afterLoginSetup($loginResponse)
-    {
-        $this->access_token = $loginResponse->access_token;
-        $this->base_url     = $loginResponse->instance_url;
-        $this->instance_url = $loginResponse->instance_url.'/services/data/v'.$this->api_version.'/';
-
-        return true;
+        $this->afterLoginSetup($response);
+        return $response;
     }
 
     /**
      * Get a list of all the API Versions for the instance.
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function getAPIVersions()
     {
-        return $this->httpRequest($this->base_url.'/services/data');
+        try {
+            $response = $this->guzzle->get('/services/data', ['debug' => $this->debug]);
+            return json_decode($response->getBody()->getContents(), true);
+        }catch(ClientException $e)
+        {
+            throw new SalesforceAPIException($e->getMessage());
+        }
     }
 
     /**
-     * Lists the limits for the organization. This is in beta and won't return for most people.
+     * Lists the limits for the organization.
+     * @note: This functionality may not work for some accounts.
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function getOrgLimits()
     {
-        return $this->request('limits/');
+        return $this->request('limits/', self::$HTTP_METHOD_GET);
     }
 
     /**
      * Gets a list of all the available REST resources.
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function getAvailableResources()
     {
-        return $this->request('');
+        return $this->request('', self::$HTTP_METHOD_GET);
     }
 
     /**
      * Get a list of all available objects for the organization.
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function getAllObjects()
     {
-        return $this->request(self::OBJECT_PATH);
+        return $this->request(self::$OBJECT_URI, self::$HTTP_METHOD_GET);
+    }
+
+    /**
+     * Getter for last response
+     *
+     * @return ResponseInterface
+     */
+    public function getLastResponse()
+    {
+        return $this->last_response;
+    }
+
+    /**
+     * Sets debug to true
+     */
+    public function enableDebug(){
+        $this->debug = true;
+    }
+
+    /**
+     * Sets debug to false
+     */
+    public function disableDebug()
+    {
+        $this->debug = false;
     }
 
     /**
@@ -219,7 +212,7 @@ class SalesforceAPI
      * @param bool     $all         Should this return all meta data including information about each field, URLs, and child relationships
      * @param DateTime $since       Only return metadata if it has been modified since the date provided
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
@@ -236,9 +229,9 @@ class SalesforceAPI
 
         // Should this return all meta data including information about each field, URLs, and child relationships
         if ($all === true) {
-            return $this->request(self::OBJECT_PATH.$objectName.'/describe/', [], self::METH_GET, $headers);
+            return $this->request(self::$OBJECT_URI.$objectName.'/describe/', self::$HTTP_METHOD_GET, [], $headers);
         } else {
-            return $this->request(self::OBJECT_PATH.$objectName, [], self::METH_GET, $headers);
+            return $this->request(self::$OBJECT_URI.$objectName, self::$HTTP_METHOD_GET, [], $headers);
         }
     }
 
@@ -248,13 +241,13 @@ class SalesforceAPI
      * @param string $objectName
      * @param array  $data
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function create($objectName, $data)
     {
-        return $this->request(self::OBJECT_PATH.(string) $objectName, $data, self::METH_POST);
+        return $this->request(self::$OBJECT_URI.(string) $objectName, self::$HTTP_METHOD_POST, $data);
     }
 
     /**
@@ -264,13 +257,13 @@ class SalesforceAPI
      * @param string $objectName object_name/field_name/field_value to identify the record
      * @param array  $data
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function upsert($objectName, $data)
     {
-        return $this->request(self::OBJECT_PATH.(string) $objectName, $data, self::METH_PATCH);
+        return $this->request(self::$OBJECT_URI.(string) $objectName, self::$HTTP_METHOD_PATCH, $data);
     }
 
     /**
@@ -280,13 +273,13 @@ class SalesforceAPI
      * @param string $objectId
      * @param array  $data
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function update($objectName, $objectId, $data)
     {
-        return $this->request(self::OBJECT_PATH.(string) $objectName.'/'.$objectId, $data, self::METH_PATCH);
+        return $this->request(self::$OBJECT_URI.(string) $objectName.'/'.$objectId, self::$HTTP_METHOD_PATCH, $data);
     }
 
     /**
@@ -295,35 +288,36 @@ class SalesforceAPI
      * @param string $objectName
      * @param string $objectId
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
     public function delete($objectName, $objectId)
     {
-        return $this->request(self::OBJECT_PATH.(string) $objectName.'/'.$objectId, null, self::METH_DELETE);
+        return $this->request(self::$OBJECT_URI.(string) $objectName.'/'.$objectId, self::$HTTP_METHOD_DELETE, []);
     }
 
     /**
      * Get a record.
      *
-     * @param string     $objectName
-     * @param string     $objectId
-     * @param array|null $fields
+     * @param string $objectName
+     * @param string $objectId
+     * @param array  $fields
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
-    public function get($objectName, $objectId, $fields = null)
+    public function get($objectName, $objectId, array $fields = [])
     {
         $params = [];
-        // If fields are included, append them to the parameters
-        if ($fields !== null && is_array($fields)) {
+
+        if (!empty($fields))
+        {
             $params['fields'] = implode(',', $fields);
         }
 
-        return $this->request(self::OBJECT_PATH.(string) $objectName.'/'.$objectId, $params);
+        return $this->request(self::$OBJECT_URI.(string) $objectName.'/'.$objectId, self::$HTTP_METHOD_GET, $params);
     }
 
     /**
@@ -333,7 +327,7 @@ class SalesforceAPI
      * @param bool   $all     Search through deleted and merged data as well
      * @param bool   $explain If the explain flag is set, it will return feedback on the query performance
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
@@ -344,7 +338,8 @@ class SalesforceAPI
         ];
 
         // If the explain flag is set, it will return feedback on the query performance
-        if ($explain) {
+        if ($explain)
+        {
             $search_data['explain'] = $search_data['q'];
             unset($search_data['q']);
         }
@@ -356,207 +351,145 @@ class SalesforceAPI
             $path = 'query/';
         }
 
-        return $this->request($path, $search_data, self::METH_GET);
-    }
-
-    /**
-     * @param string $query
-     * @return mixed
-     * @throws SalesforceAPIException
-     */
-    public function getQueryFromUrl($query)
-    {
-        // Throw an error if no access token
-        if (!isset($this->access_token))
-        {
-            throw new SalesforceAPIException('You have not logged in yet.');
-        }
-
-        // Set the Authorization header
-        $request_headers = [
-            'Authorization' => 'Bearer '.$this->access_token,
-        ];
-
-        // Merge all the headers
-        $request_headers = array_merge($request_headers, []);
-
-        return $this->httpRequest($this->base_url.$query, [], $request_headers);
+        return $this->request($path, self::$HTTP_METHOD_GET, $search_data);
     }
 
     /**
      * Makes a request to the API using the access key.
      *
-     * @param string $path    The path to use for the API request
-     * @param array  $params
-     * @param string $method
-     * @param array  $headers
+     * @param string $uri     The path to use for the API request
+     * @param string $method  The HTTP method to use
+     * @param array  $params  Parameters to include (default: [])
+     * @param array  $headers Headers to include (default: [])
      *
-     * @return mixed
+     * @return array
      *
      * @throws SalesforceAPIException
      */
-    protected function request($path, $params = [], $method = self::METH_GET, $headers = [])
+    protected function request($uri, $method, $params = [], $headers = [])
     {
-        // Throw an error if no access token
-        if (!isset($this->access_token)) {
-            throw new SalesforceAPIException('You have not logged in yet.');
-        }
-
-        // Set the Authorization header
-        $request_headers = [
-            'Authorization' => 'Bearer '.$this->access_token,
-        ];
-
-        // Merge all the headers
-        $request_headers = array_merge($request_headers, $headers);
-
-        return $this->httpRequest($this->instance_url.$path, $params, $request_headers, $method);
+        return $this->httpRequest('/services/data/v'.$this->api_version.'/'.$uri, $method, $params, $headers);
     }
 
     /**
      * Performs the actual HTTP request to the Salesforce API.
      *
-     * @param string     $url
-     * @param array|null $params
-     * @param array|null $headers
-     * @param string     $method
-     *
-     * @return mixed
-     *
-     * @throws SalesforceAPIException
-     */
-    protected function httpRequest($url, $params = null, $headers = null, $method = self::METH_GET)
-    {
-        $this->handle = curl_init();
-        $options = [
-            CURLOPT_CONNECTTIMEOUT => 2,
-            CURLOPT_TIMEOUT        => 60,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_BUFFERSIZE     => 128000,
-            CURLINFO_HEADER_OUT    => true,
-        ];
-        curl_setopt_array($this->handle, $options);
-
-        // Set the headers
-        if (isset($headers) && $headers !== null && !empty($headers)) {
-            $request_headers = array_merge($this->headers, $headers);
-        } else {
-            $request_headers = $this->headers;
-        }
-
-        // Add any custom fields to the request
-        if (isset($params) && $params !== null && !empty($params)) {
-            if ($request_headers['Content-Type'] == 'application/json') {
-                $json_params = json_encode($params);
-                curl_setopt($this->handle, CURLOPT_POSTFIELDS, $json_params);
-            } else {
-                $http_params = http_build_query($params);
-                curl_setopt($this->handle, CURLOPT_POSTFIELDS, $http_params);
-            }
-        }
-
-        // Modify the request depending on the type of request
-        switch ($method) {
-            case 'POST':
-                curl_setopt($this->handle, CURLOPT_POST, true);
-                break;
-            case 'GET':
-                curl_setopt($this->handle, CURLOPT_HTTPGET, true);
-                if (isset($params) && $params !== null && !empty($params)) {
-                    $url .= '?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986);
-                }
-                break;
-            default:
-                curl_setopt($this->handle, CURLOPT_CUSTOMREQUEST, $method);
-                break;
-        }
-
-        curl_setopt($this->handle, CURLOPT_URL, $url);
-        curl_setopt($this->handle, CURLOPT_HTTPHEADER, $this->createCurlHeaderArray($request_headers));
-
-        $response = curl_exec($this->handle);
-
-        $response = $this->checkForRequestErrors($response, $this->handle);
-
-        if ($this->return_type === self::RETURN_OBJECT) {
-            $result = json_decode($response);
-        } elseif ($this->return_type === self::RETURN_ARRAY_A) {
-            $result = json_decode($response, true);
-        }
-
-        curl_close($this->handle);
-
-        return $result;
-    }
-
-    /**
-     * Makes the header array have the right format for the Salesforce API.
-     *
-     * @param $headers
+     * @param string $uri     The URI path used for the API request
+     * @param string $method  The HTTP method to use
+     * @param array  $params  Parameters to include (default: [])
+     * @param array  $headers Headers to include (default: [])
      *
      * @return array
+     *
+     * @throws SalesforceAPIException
      */
-    private function createCurlHeaderArray($headers)
+    protected function httpRequest($uri, $method, array $params = [], array $headers = [])
     {
-        $curl_headers = [];
-        // Create the header array for the request
-        foreach ($headers as $key => $header) {
-            $curl_headers[] = $key.': '.$header;
+        if (!isset($this->access_token))
+        {
+            throw new SalesforceAPIException('You are not logged in.');
         }
 
-        return $curl_headers;
+        try {
+
+            $options = ['debug' => $this->debug];
+
+            if (!empty($headers))
+            {
+                $options['headers'] = $headers;
+            }
+
+            if (!empty($params))
+            {
+                if ($method == self::$HTTP_METHOD_GET)
+                {
+                    $uri .= '?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+                }else
+                {
+                    $options['body'] = json_encode($params);
+                }
+            }
+
+            $response = $this->guzzle->request($method, $uri, $options);
+        }
+        catch (ClientException $e)
+        {
+            throw new SalesforceAPIException($e->getMessage());
+        }
+
+        return $this->handleSalesForceErrors($response);
+
+        return json_decode($response->getBody()->getContents(), true);
     }
 
     /**
-     * Checks for errors in a request.
+     * Check the payload to see if there was an issue working with the API
      *
-     * @param string   $response The response from the server
-     * @param Resource $handle   The CURL handle
-     *
-     * @return string The response from the API
+     * @param ResponseInterface $response
      *
      * @throws SalesforceAPIException
-     *
-     * @see http://www.salesforce.com/us/developer/docs/api_rest/index_Left.htm#CSHID=errorcodes.htm|StartTopic=Content%2Ferrorcodes.htm|SkinName=webhelp
      */
-    private function checkForRequestErrors($response, $handle)
+    protected function handleSalesForceErrors($response)
     {
-        $curl_error = curl_error($handle);
-        if ($curl_error !== '') {
-            throw new SalesforceAPIException($curl_error);
-        }
-        $request_info = curl_getinfo($handle);
-
-        switch ($request_info['http_code']) {
+        $responseBody = $response->getBody()->getContents();
+        $response->getBody()->rewind(); // rewind the stream
+        switch ($response->getStatusCode()) {
             case 304:
-                if ($response === '') {
-                    return json_encode(['message' => 'The requested object has not changed since the specified time']);
+                if ($responseBody === '') {
+                    return ['message' => 'The requested object has not changed since the specified time'];
                 }
                 break;
             case 300:
             case 200:
             case 201:
             case 204:
-                if ($response === '') {
-                    return json_encode(['success' => true]);
+                if ($responseBody === '') {
+                    return ['success' => true];
                 }
                 break;
             default:
-                if (empty($response) || $response !== '') {
-                    $err = new SalesforceAPIException($response, $request_info);
-                    throw $err;
+                if (empty($responseBody) || $responseBody !== '') {
+                    throw new SalesforceAPIException($response);
                 } else {
-                    $result = json_decode($response);
+                    $result = json_decode($responseBody);
                     if (isset($result->error)) {
-                        $err = new SalesforceAPIException($result->error_description, $request_info);
-                        throw $err;
+                        throw new SalesforceAPIException($result->error_description);
                     }
                 }
                 break;
         }
 
+        if ($response->getStatusCode() > 400)
+        {
+            throw new SalesforceAPIException($response->getReasonPhrase());
+        }
+
         $this->last_response = $response;
 
-        return $response;
+        return json_decode($responseBody, true);
+    }
+
+    /**
+     * Following login, restablish guzzle using bearer token and new instance_url.
+     *
+     * @param ResponseInterface $response
+     * @return bool
+     */
+    protected function afterLoginSetup($response)
+    {
+        $responseData = json_decode($response->getBody()->getContents(), true);
+
+        $this->access_token = $responseData['access_token'];
+
+        // rebuild guzzle client with new instance URL (it can change) and bearer token
+        $this->guzzle = new Client([
+            'base_uri'  => $responseData['instance_url'],
+            'headers'   => [
+                'Authorization' => 'Bearer '.$this->access_token,
+                'Content-Type'  => 'application/json'
+            ]
+        ]);
+
+        return true;
     }
 }
