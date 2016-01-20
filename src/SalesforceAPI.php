@@ -33,11 +33,6 @@ class SalesforceAPI
     private static $GRANT_TYPE = 'password';
 
     /**
-     * @var ResponseInterface
-     */
-    protected $last_response;
-
-    /**
      * @var string
      */
     protected $client_id;
@@ -53,14 +48,14 @@ class SalesforceAPI
     protected $api_version;
 
     /**
-     * @var string
-     */
-    protected $access_token;
-
-    /**
      * @var Client
      */
     protected $guzzle;
+
+    /**
+     * @var ResponseInterface
+     */
+    protected $last_response;
 
     /**
      * @var bool
@@ -385,11 +380,6 @@ class SalesforceAPI
      */
     protected function httpRequest($uri, $method, array $params = [], array $headers = [])
     {
-        if (!isset($this->access_token))
-        {
-            throw new SalesforceAPIException('You are not logged in.');
-        }
-
         try {
 
             $options = ['debug' => $this->debug];
@@ -417,9 +407,7 @@ class SalesforceAPI
             throw new SalesforceAPIException($e->getMessage());
         }
 
-        return $this->handleSalesForceErrors($response);
-
-        return json_decode($response->getBody()->getContents(), true);
+        return $this->handleSalesForceResponse($response);
     }
 
     /**
@@ -429,7 +417,7 @@ class SalesforceAPI
      *
      * @throws SalesforceAPIException
      */
-    protected function handleSalesForceErrors($response)
+    protected function handleSalesForceResponse($response)
     {
         $responseBody = $response->getBody()->getContents();
         $response->getBody()->rewind(); // rewind the stream
@@ -479,13 +467,11 @@ class SalesforceAPI
     {
         $responseData = json_decode($response->getBody()->getContents(), true);
 
-        $this->access_token = $responseData['access_token'];
-
         // rebuild guzzle client with new instance URL (it can change) and bearer token
         $this->guzzle = new Client([
             'base_uri'  => $responseData['instance_url'],
             'headers'   => [
-                'Authorization' => 'Bearer '.$this->access_token,
+                'Authorization' => 'Bearer '.$responseData['access_token'],
                 'Content-Type'  => 'application/json'
             ]
         ]);
