@@ -6,10 +6,11 @@ use GuzzleHttp\Exception\ClientException;
 use Psr\Http\Message\ResponseInterface;
 
 /**
- * The Salesforce REST API PHP Wrapper.
+ * Class SalesforceAPI
  *
- * This class connects to the Salesforce REST API and performs actions on that API
+ * The Salesforce REST API PHP Wrapper. This class connects to the Salesforce REST API and performs actions on that API
  *
+ * @package SalesforceRestAPI
  * @author Mike Corrigan <mike@corrlabs.com>
  * @author Anthony Humes <jah.humes@gmail.com> (original author)
  * @license GPL-2.0
@@ -203,9 +204,9 @@ class SalesforceAPI
     /**
      * Get metadata about an Object.
      *
-     * @param string   $objectName
-     * @param bool     $all         Should this return all meta data including information about each field, URLs, and child relationships
-     * @param DateTime $since       Only return metadata if it has been modified since the date provided
+     * @param string   $objectName  The Salesforce object to return data on
+     * @param bool     $all         Should this return all meta data including information about each field, URLs, and child relationships (default: null)
+     * @param DateTime $since       Only return metadata if it has been modified since the date provided (default: null)
      *
      * @return array
      *
@@ -233,8 +234,8 @@ class SalesforceAPI
     /**
      * Create a new record.
      *
-     * @param string $objectName
-     * @param array  $data
+     * @param string $objectName The Salesforce object to create
+     * @param array  $data       The properties of the object
      *
      * @return array
      *
@@ -248,9 +249,8 @@ class SalesforceAPI
     /**
      * Update or Insert a record based on an external field and value.
      *
-     *
      * @param string $objectName object_name/field_name/field_value to identify the record
-     * @param array  $data
+     * @param array  $data       Properties of the object that are being added/updated
      *
      * @return array
      *
@@ -264,9 +264,9 @@ class SalesforceAPI
     /**
      * Update an existing object.
      *
-     * @param string $objectName
-     * @param string $objectId
-     * @param array  $data
+     * @param string $objectName The type of Salesforce object being updated
+     * @param string $objectId   The ID of the object being updated
+     * @param array  $data       The properties of the object that are being changed
      *
      * @return array
      *
@@ -280,8 +280,8 @@ class SalesforceAPI
     /**
      * Delete a record.
      *
-     * @param string $objectName
-     * @param string $objectId
+     * @param string $objectName The type of Salesforce object
+     * @param string $objectId   The ID of the object being deleted
      *
      * @return array
      *
@@ -295,9 +295,9 @@ class SalesforceAPI
     /**
      * Get a record.
      *
-     * @param string $objectName
-     * @param string $objectId
-     * @param array  $fields
+     * @param string $objectName The name of the Salesforce object being returned
+     * @param string $objectId   The ID of the object
+     * @param array  $fields     The fields of that object that should be returned, defaults to all (default: [])
      *
      * @return array
      *
@@ -319,8 +319,8 @@ class SalesforceAPI
      * Searches using a SOQL Query.
      *
      * @param string $query   The query to perform
-     * @param bool   $all     Search through deleted and merged data as well
-     * @param bool   $explain If the explain flag is set, it will return feedback on the query performance
+     * @param bool   $all     Search through deleted and merged data as well (default: false)
+     * @param bool   $explain If the explain flag is set, it will return feedback on the query performance (default: false)
      *
      * @return array
      *
@@ -413,7 +413,7 @@ class SalesforceAPI
     /**
      * Check the payload to see if there was an issue working with the API
      *
-     * @param ResponseInterface $response
+     * @param ResponseInterface $response A response object from Guzzle
      *
      * @throws SalesforceAPIException
      */
@@ -460,7 +460,7 @@ class SalesforceAPI
     /**
      * Following login, restablish guzzle using bearer token and new instance_url.
      *
-     * @param ResponseInterface $response
+     * @param ResponseInterface $response The response object from Guzzle
      * @return bool
      */
     protected function afterLoginSetup($response)
